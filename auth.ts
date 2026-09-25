@@ -5,7 +5,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { verify } from "argon2";
 import { db } from "@/lib/db";
 import { loginSchema } from "@/lib/validation/auth";
-import { isAllowedGithubEmail } from "@/lib/auth/github-access";
+import { requiresTwoFactorForSession } from "@/lib/auth/two-factor-policy";
 
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 const configuredDemoSeconds = Number(process.env.DEMO_SHORT_SESSION_SECONDS ?? "60");
@@ -38,6 +38,27 @@ async function acceptPendingInvitation(userId: string, email: string) {
   return db.membership.findFirst({ where: { userId }, orderBy: { createdAt: "desc" } });
 }
 
+async function resolveMembership(userId: string, email: string, isGithubDeveloper: boolean) {
+  const invitedOrExistingMembership = await acceptPendingInvitation(userId, email);
+  if (invitedOrExistingMembership || !isGithubDeveloper) return invitedOrExistingMembership;
+
+  // This assessment is a single-workspace demo. A verified GitHub identity is
+  // treated as a developer and receives the restricted STAFF permission set
+  // without needing an administrator invitation.
+  const demoOrganization = await db.organization.findFirst({
+    where: { memberships: { some: { role: "ADMIN" } } },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  if (!demoOrganization) return null;
+
+  return db.membership.upsert({
+    where: { userId_organizationId: { userId, organizationId: demoOrganization.id } },
+    update: {},
+    create: { userId, organizationId: demoOrganization.id, role: "STAFF" },
+  });
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(db),
   session: { strategy: "jwt", maxAge: SESSION_MAX_AGE_SECONDS },
@@ -65,9 +86,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           if (!profileResponse.ok || !emailsResponse.ok) throw new Error("Could not verify the GitHub identity.");
           const profile = await profileResponse.json() as GitHubProfile;
           const emails = await emailsResponse.json() as GitHubEmail[];
-          const verifiedEmail = emails.find((email) => email.primary && email.verified && isAllowedGithubEmail(email.email))
-            ?? emails.find((email) => email.verified && isAllowedGithubEmail(email.email));
-          if (!verifiedEmail) throw new Error("GitHub access requires an approved StockFlow developer email.");
+          const verifiedEmail = emails.find((email) => email.primary && email.verified)
+            ?? emails.find((email) => email.verified);
+          if (!verifiedEmail) throw new Error("GitHub access requires a verified email address.");
           return { ...profile, email: verifiedEmail.email.toLowerCase() };
         },
       },
@@ -129,8 +150,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     async signIn({ user, account }) {
       if (!user.id || !user.email) return false;
-      if (account?.provider === "github" && !isAllowedGithubEmail(user.email)) return false;
-      return Boolean(await acceptPendingInvitation(user.id, user.email));
+      return Boolean(await resolveMembership(user.id, user.email, account?.provider === "github"));
     },
     async jwt({ token, user, account }) {
       const rawUserId = user?.id ?? token.userId ?? token.sub;
@@ -156,10 +176,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         delete token.activeSessionId;
         return token;
       }
-      const activeSessionId = typeof token.activeSessionId === "string"
-        ? token.activeSessionId
-        : typeof token.jti === "string" ? token.jti : crypto.randomUUID();
+      const isFreshSignIn = Boolean(user && account);
+      const previousActiveSessionId = typeof token.activeSessionId === "string" ? token.activeSessionId : undefined;
+      const activeSessionId = isFreshSignIn
+        ? crypto.randomUUID()
+        : previousActiveSessionId ?? (typeof token.jti === "string" ? token.jti : crypto.randomUUID());
       const now = new Date();
+      if (isFreshSignIn && previousActiveSessionId && previousActiveSessionId !== activeSessionId) {
+        await db.activeSession.deleteMany({ where: { id: previousActiveSessionId, userId } });
+      }
       if (user && !current.demoSessionUsedAt && DEMO_SESSION_SECONDS > 0) {
         const claimed = await db.user.updateMany({
           where: { id: userId, demoSessionUsedAt: null },
@@ -178,7 +203,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       const tokenEmail = user?.email ?? (typeof token.email === "string" ? token.email : undefined);
       const membership = tokenEmail
-        ? await acceptPendingInvitation(userId, tokenEmail)
+        ? await resolveMembership(userId, tokenEmail, account?.provider === "github")
         : await db.membership.findFirst({ where: { userId }, orderBy: { createdAt: "desc" } });
       if (!membership) {
         await db.activeSession.deleteMany({ where: { id: activeSessionId } });
@@ -195,7 +220,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         db.twoFactorCredential.findUnique({ where: { userId }, select: { enabledAt: true } }),
         db.activeSession.findUnique({ where: { id: activeSessionId }, select: { twoFactorVerifiedAt: true } }),
       ]);
-      const requiresTwoFactor = Boolean(twoFactorCredential?.enabledAt && !existingActiveSession?.twoFactorVerifiedAt);
+      const requiresTwoFactor = requiresTwoFactorForSession({
+        provider: authProvider,
+        twoFactorEnabled: Boolean(twoFactorCredential?.enabledAt),
+        sessionVerified: Boolean(existingActiveSession?.twoFactorVerifiedAt),
+      });
 
       token.userId = userId;
       token.organizationId = membership.organizationId;

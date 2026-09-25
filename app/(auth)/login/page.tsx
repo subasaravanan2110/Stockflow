@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { LoginForm } from "@/components/auth/login-form";
 import { loginRedirectFor } from "@/lib/auth/redirects";
-import { parseGithubAllowedDomains } from "@/lib/auth/github-access";
 
 export const metadata: Metadata = { title: "Sign in" };
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reason?: string; error?: string }> }) {
@@ -13,6 +12,5 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return <LoginForm
     demoSessionExpired={params.reason === "demo-session-expired" || session?.demoSessionExpired}
     githubAccessDenied={Boolean(params.error)}
-    githubAllowedDomains={parseGithubAllowedDomains()}
   />;
 }

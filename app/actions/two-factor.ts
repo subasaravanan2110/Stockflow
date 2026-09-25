@@ -23,43 +23,50 @@ async function limited(scope: string, userId: string) {
   return !rateLimit(`${scope}:${userId}:${ip}`, 8, 60_000).allowed;
 }
 
+async function authenticatedSession() {
+  const session = await auth();
+  if (!session?.user?.id || !session.user.organizationId || session.demoSessionExpired) redirect("/login");
+  return session;
+}
+
 export async function beginTwoFactorSetupAction(): Promise<TwoFactorActionState> {
-  const user = await requireUser();
-  if (await limited("2fa-setup", user.id)) return { status: "error", message: "Too many attempts. Try again shortly." };
-  const existing = await db.twoFactorCredential.findUnique({ where: { userId: user.id } });
+  const session = await authenticatedSession();
+  if (await limited("2fa-setup", session.user.id)) return { status: "error", message: "Too many attempts. Try again shortly." };
+  const existing = await db.twoFactorCredential.findUnique({ where: { userId: session.user.id } });
   if (existing?.enabledAt) return { status: "error", message: "Two-factor authentication is already enabled." };
 
-  const setup = createTwoFactorSetup(user.email);
+  const setup = createTwoFactorSetup(session.user.email ?? "StockFlow developer");
   await db.twoFactorCredential.upsert({
-    where: { userId: user.id },
+    where: { userId: session.user.id },
     update: { secretEncrypted: setup.encryptedSecret, enabledAt: null },
-    create: { userId: user.id, secretEncrypted: setup.encryptedSecret },
+    create: { userId: session.user.id, secretEncrypted: setup.encryptedSecret },
   });
   const qrCode = await QRCode.toDataURL(setup.uri, { width: 184, margin: 1, errorCorrectionLevel: "M" });
   return { status: "success", message: "Scan the QR code, then enter the six-digit code.", qrCode, manualKey: setup.secret };
 }
 
 export async function confirmTwoFactorSetupAction(_: TwoFactorActionState, formData: FormData): Promise<TwoFactorActionState> {
-  const user = await requireUser();
-  if (await limited("2fa-confirm", user.id)) return { status: "error", message: "Too many attempts. Try again shortly." };
+  const session = await authenticatedSession();
+  if (await limited("2fa-confirm", session.user.id)) return { status: "error", message: "Too many attempts. Try again shortly." };
   const code = String(formData.get("code") ?? "").replaceAll(" ", "");
-  const credential = await db.twoFactorCredential.findUnique({ where: { userId: user.id } });
+  const credential = await db.twoFactorCredential.findUnique({ where: { userId: session.user.id } });
   if (!credential || credential.enabledAt) return { status: "error", message: "Start setup again to get a fresh QR code." };
   if (!(await verifyTwoFactorCode(credential.secretEncrypted, code))) return { status: "error", message: "That authenticator code is invalid or expired." };
 
-  const session = await auth();
   await db.$transaction([
-    db.twoFactorCredential.update({ where: { userId: user.id }, data: { enabledAt: new Date() } }),
-    ...(session?.activeSessionId
-      ? [db.activeSession.updateMany({ where: { id: session.activeSessionId, userId: user.id }, data: { twoFactorVerifiedAt: new Date() } })]
+    db.twoFactorCredential.update({ where: { userId: session.user.id }, data: { enabledAt: new Date() } }),
+    ...(session.activeSessionId
+      ? [db.activeSession.updateMany({ where: { id: session.activeSessionId, userId: session.user.id }, data: { twoFactorVerifiedAt: new Date() } })]
       : []),
   ]);
   revalidatePath("/dashboard/settings");
+  if (session.requiresTwoFactor) redirect("/dashboard");
   return { status: "success", message: "Two-factor authentication is enabled." };
 }
 
 export async function disableTwoFactorAction(_: TwoFactorActionState, formData: FormData): Promise<TwoFactorActionState> {
   const user = await requireUser();
+  if (user.authProvider === "github") return { status: "error", message: "Two-factor authentication is required for GitHub developer access." };
   if (await limited("2fa-disable", user.id)) return { status: "error", message: "Too many attempts. Try again shortly." };
   const code = String(formData.get("code") ?? "").replaceAll(" ", "");
   const credential = await db.twoFactorCredential.findUnique({ where: { userId: user.id } });

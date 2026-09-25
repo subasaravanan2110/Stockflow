@@ -41,7 +41,7 @@ export function deterministicInventoryAnswer(question: string, context: Inventor
     return "Open Reports for inventory value and reorder priorities. Use “Export CSV” when you need a spreadsheet-ready inventory report.";
   }
   if (/two.?factor|2fa|authenticator/.test(q)) {
-    return "To enable 2FA:\n1. Open Settings.\n2. In the Two-factor authentication card, choose “Enable 2FA”.\n3. Scan the QR code with Google Authenticator, Microsoft Authenticator, Authy, or another TOTP app.\n4. Enter the current six-digit code shown by the app.\n5. Choose “Verify and enable”.\n\nFuture password and GitHub sign-ins will ask for a fresh six-digit code. Keep the manual setup key private.";
+    return "To enable 2FA:\n1. Open Settings.\n2. In the Two-factor authentication card, choose “Enable 2FA”.\n3. Scan the QR code with Google Authenticator, Microsoft Authenticator, Authy, or another TOTP app.\n4. Enter the current six-digit code shown by the app.\n5. Choose “Verify and enable”.\n\nGitHub developer sign-ins always require a fresh six-digit code. Credential users are challenged after they enable 2FA. Keep the manual setup key private.";
   }
   if (/team|signed.?in user|role|admin|staff/.test(q)) {
     return "StockFlow separates Admin and Staff permissions. Admins manage catalog and procurement records and can monitor signed-in users; Staff can safely use permitted inventory workflows.";

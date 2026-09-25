@@ -88,7 +88,7 @@ pnpm db:seed
 pnpm dev
 ```
 
-Open `http://localhost:3000`. The dedicated administrator uses the credentials from `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD`. Staff registration is invitation-only; an existing GitHub identity can join after its verified email receives an administrator invitation.
+Open `http://localhost:3000`. The dedicated administrator uses the credentials from `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD`. Staff registration is invitation-only. GitHub identities with a verified email join the demo workspace automatically as restricted developers and do not require administrator approval.
 
 To configure GitHub OAuth, create an OAuth App and set its callback URL to:
 
@@ -98,7 +98,7 @@ http://localhost:3000/api/auth/callback/github
 
 Then provide `AUTH_GITHUB_ID` and `AUTH_GITHUB_SECRET`. In production, replace the host with the Vercel production domain.
 
-For the assessment demo, leave `GITHUB_ALLOWED_EMAIL_DOMAINS` empty so an evaluator can use a GitHub account with a verified email. For production, configure it with exact comma-separated company domains (for example, `stockflow.com`) to restrict GitHub access to approved company developers. In both modes, the identity must also have an existing workspace membership or valid invitation.
+The GitHub path is intentionally frictionless for assessment reviewers: any GitHub identity with a verified email may enter the single demo workspace. On first use, the developer enrolls an authenticator app. Every new GitHub login then requires a fresh six-digit code. Credential users may opt into the same protection from Settings.
 
 ### Transactional email
 
@@ -144,7 +144,7 @@ pnpm db:seed      # reproducible demo workspace
 - Historical products are archived; movements remain immutable.
 - CSV values are neutralized against spreadsheet-formula injection.
 - Authentication endpoints use generic errors and basic rate limiting.
-- TOTP secrets use AES-256-GCM encryption derived from `AUTH_SECRET`; 2FA verification is required after either password or GitHub authentication.
+- TOTP secrets use AES-256-GCM encryption derived from `AUTH_SECRET`; every GitHub login requires 2FA, while credential users can enable it from Settings.
 - `DEMO_SHORT_SESSION_SECONDS` gives each user one visibly short assessment-demo session; the database marker ensures all later sessions return to the normal seven-day duration.
 
 For horizontally scaled production rate limiting, replace the included process-local limiter with a shared Redis/Vercel KV limiter.
