@@ -1,0 +1,4 @@
+ALTER TABLE "User"
+ADD COLUMN "lastSignedInAt" TIMESTAMP(3),
+ADD COLUMN "lastActivityAt" TIMESTAMP(3),
+ADD COLUMN "lastSignedOutAt" TIMESTAMP(3);
