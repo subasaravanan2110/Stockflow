@@ -149,8 +149,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   callbacks: {
     async signIn({ user, account }) {
-      if (!user.id || !user.email) return false;
-      return Boolean(await resolveMembership(user.id, user.email, account?.provider === "github"));
+      if (!user.email) return false;
+      // Auth.js runs this callback before persisting a first-time OAuth user.
+      // Approve verified GitHub profiles here; the JWT callback runs after the
+      // adapter has created the user and can safely create their membership.
+      if (account?.provider === "github") return true;
+      if (!user.id) return false;
+      return Boolean(await acceptPendingInvitation(user.id, user.email));
     },
     async jwt({ token, user, account }) {
       const rawUserId = user?.id ?? token.userId ?? token.sub;
