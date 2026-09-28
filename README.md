@@ -1,3 +1,12 @@
+
+# StockFlow
+unlike other applications you cannot directly sign up
+only admin can create credentials for you
+to create staff account:
+login to admin through admin credentials-adminstockflow@gmail.com;password:nimdA@908! and go to team activities
+admin can see work of all staffs whereas staff can see work of their own which means one staff cannot seee work of other staffs
+developers can login through github
+
 # StockFlow
 
 StockFlow is a secure inventory-management application for small businesses. It combines familiar product and supplier CRUD with an immutable stock ledger, tenant isolation, purchase records, low-stock signals, audit history, and exportable reporting.
